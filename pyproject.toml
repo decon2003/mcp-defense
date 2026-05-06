@@ -1,0 +1,50 @@
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "mcp-defense"
+version     = "1.0.0"
+description = "4-layer Tool Poisoning defense system for AI agents using MCP"
+readme      = "README.md"
+license     = { text = "MIT" }
+requires-python = ">=3.10"
+
+keywords = ["mcp", "ai-agent", "security", "tool-poisoning", "llm", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio",
+    "anthropic>=0.40.0",
+]
+
+[project.urls]
+Homepage   = "https://github.com/your-org/mcp-defense"
+Issues     = "https://github.com/your-org/mcp-defense/issues"
+
+[tool.pytest.ini_options]
+testpaths   = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mcp_defense*"]
