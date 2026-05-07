@@ -624,6 +624,25 @@ python examples/04_tool_attack_chain.py
 python examples/05_shadowing_and_rugpull.py
 ```
 
+For a visual browser demo suitable for screenshots or a blog post:
+
+```bash
+python examples/06_visual_attack_lab.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The visual lab includes four scenarios:
+
+- Tool Poisoning
+- Tool Shadowing
+- Rug Pull
+- Cross-tool source-to-sink exfiltration
+
 ## Development
 
 ```bash
