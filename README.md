@@ -45,6 +45,219 @@ Tool calls     -> validate parameters before execution
 Runtime chain  -> detect source-to-sink attack sequences
 ```
 
+## Protection Components
+
+`mcp-defense` is built from five cooperating components. You can use the
+high-level `ToolPoisonDefense` facade, or instantiate individual components if
+you need tighter control.
+
+### 1. RegexScanner
+
+`RegexScanner` runs when tools are loaded. It scans tool names, descriptions,
+input schemas, parameter schemas, and other schema-like fields before those
+tools are exposed to the agent.
+
+It looks for common Tool Poisoning indicators:
+
+- fake system or admin markers;
+- instructions to call another tool;
+- secrecy demands such as "do not tell the user";
+- attempts to override previous, system, developer, or safety instructions;
+- credential and filesystem references;
+- suspicious phone numbers or external contacts;
+- exfiltration vocabulary such as `bcc`, `webhook`, `mirror`, or `leak`.
+
+Example:
+
+```python
+from mcp_defense import RegexScanner
+
+scanner = RegexScanner()
+result = scanner.scan_tool(tool_definition)
+
+if not result.passed:
+    print(result.matched_label)
+    print(result.context_snippet)
+```
+
+The facade uses it through:
+
+```python
+safe_tools = defense.load_tools(raw_tools)
+```
+
+If a tool fails this layer, it never reaches the agent context.
+
+### 2. LLMAuditor
+
+`LLMAuditor` is an optional semantic review layer for tool metadata. It is
+designed for payloads that are harder to catch with static patterns, such as
+obfuscated instructions, split instructions, or natural-language manipulation
+hidden in long descriptions.
+
+It is disabled by default:
+
+```python
+defense = ToolPoisonDefense()
+```
+
+Enable it explicitly:
+
+```python
+defense = ToolPoisonDefense(use_llm_audit=True)
+```
+
+When enabled, it runs after `RegexScanner` and before the agent receives the
+tool list. The auditor fails closed by default: if the audit cannot run or the
+response format is invalid, the tool is treated as unsafe.
+
+Use this layer when:
+
+- the tool list comes from untrusted MCP servers;
+- tool descriptions are long or dynamic;
+- you want a semantic reviewer in addition to deterministic checks.
+
+### 3. ParameterGuard
+
+`ParameterGuard` runs before every tool execution. It does not inspect the
+model's reasoning; it enforces concrete policy on the parameters that are about
+to reach the tool.
+
+It can enforce:
+
+- required fields;
+- blocked fields;
+- regex patterns for field values;
+- allowed path prefixes;
+- blocked keywords;
+- allowed or blocked URL domains;
+- nested parameter checks.
+
+Example:
+
+```python
+from mcp_defense.guard import ToolRules
+
+defense.register_tool_rules(
+    "send_internal_report",
+    ToolRules(
+        field_patterns={"to": r"^[\w.]+@company\.com$"},
+        blocked_fields=["bcc", "forward_to", "extra_recipients"],
+        required_fields=["to", "subject"],
+    ),
+)
+```
+
+This layer is important because many attack chains use legitimate tools with
+malicious parameters. For example, a poisoned tool may not send data itself; it
+may convince the agent to call `send_email` with a hidden `bcc` field.
+
+### 4. ReasoningMonitor
+
+`ReasoningMonitor` records every tool call and compares high-risk tool usage
+against the original user request.
+
+It detects runtime anomalies such as:
+
+- high-risk tool called without matching user intent;
+- too many tool calls in one session;
+- rapid bursts of tool calls;
+- alerts raised by the attack-chain detector.
+
+The monitor is alerting-oriented. It does not block by itself. This keeps
+observability separate from enforcement.
+
+Example:
+
+```python
+def handle_alert(alert):
+    print(alert.level, alert.event_type, alert.message)
+
+defense = ToolPoisonDefense(alert_callback=handle_alert)
+```
+
+Export a session log:
+
+```python
+events = defense.get_session_log("session-1")
+```
+
+### 5. ToolChainMonitor
+
+`ToolChainMonitor` is the attack-chain layer. It tracks the sequence of tools
+called inside a session and evaluates whether the sequence forms a dangerous
+chain.
+
+It models tools using `ToolRiskProfile`:
+
+```python
+from mcp_defense import ToolRiskProfile
+
+ToolRiskProfile(
+    category="source",
+    data_types=("customer_data",),
+    external=False,
+)
+```
+
+Categories:
+
+- `source`: reads sensitive data;
+- `sink`: sends data or mutates an external system;
+- `transform`: processes data;
+- `neutral`: low-risk tool.
+
+The most important built-in detection is:
+
+```text
+sensitive source -> external sink
+```
+
+Examples:
+
+```text
+read_file -> http_request
+execute_sql -> send_email
+list_repositories -> create_pull_request
+read_customer_records -> post_to_webhook
+```
+
+You can also forbid exact transitions:
+
+```python
+defense.forbid_tool_chain("read_file", "send_email")
+```
+
+Export the chain timeline:
+
+```python
+chain = defense.get_chain_log("session-1")
+```
+
+### How The Layers Work Together
+
+The default flow is:
+
+```text
+load_tools(raw_tools)
+  -> RegexScanner blocks obvious poisoned metadata
+  -> LLMAuditor optionally reviews remaining tools
+  -> safe tools are returned to the agent
+
+call_tool(...)
+  -> ParameterGuard validates concrete parameters
+  -> ToolChainMonitor checks the session-level tool sequence
+  -> ReasoningMonitor records and alerts
+  -> executor runs only if policy allows it
+```
+
+This gives you two types of protection:
+
+- **load-time protection**: prevent poisoned tools from entering the agent
+  context;
+- **runtime protection**: prevent or detect dangerous tool calls and tool
+  sequences.
+
 ## Features
 
 - Blocks poisoned tool descriptions and schema fields before the agent sees them.
