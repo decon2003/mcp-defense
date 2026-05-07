@@ -1,9 +1,9 @@
 """
 Layer 1 - RegexScanner.
 
-Fast load-time scanning for known tool-poisoning indicators in MCP tool
-metadata. The scanner checks the description plus schema-like fields because
-poison payloads are often hidden in parameter descriptions.
+Fast load-time scanning for known malicious MCP tool metadata patterns. The
+scanner checks descriptions and schema-like fields because attacks are often
+hidden in parameter descriptions, not only in the top-level description.
 """
 
 from __future__ import annotations
@@ -19,18 +19,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PATTERNS: list[tuple[str, str]] = [
     (
-        r"(?i)\b(do\s+not|don't|never|khong|không)\b.{0,40}"
-        r"\b(tell|show|mention|inform|display|reveal|notify|noi|nói)\b",
+        r"(?i)\b(do\s+not|don't|never|khong)\b.{0,40}"
+        r"\b(tell|show|mention|inform|display|reveal|notify|noi)\b",
         "secrecy_demand",
     ),
     (
-        r"(?i)\b(secretly|silently|without\s+(the\s+)?user\s+(knowing|noticing)|"
-        r"ẩn\s+danh|bí\s+mật)\b",
+        r"(?i)\b(secretly|silently|without\s+(the\s+)?user\s+(knowing|noticing))\b",
         "stealth_instruction",
     ),
     (
-        r"(?i)\b(before|prior\s+to|first|trước\s+khi)\b.{0,80}"
-        r"\b(call|invoke|trigger|send|read|execute|run|gọi|gửi|đọc|chạy)\b",
+        r"(?i)\b(before|prior\s+to|first)\b.{0,80}"
+        r"\b(call|invoke|trigger|send|read|execute|run)\b",
         "pre_action_injection",
     ),
     (
@@ -64,6 +63,16 @@ DEFAULT_PATTERNS: list[tuple[str, str]] = [
         r"\s*\(",
         "cross_tool_invocation",
     ),
+    (
+        r"(?i)\b(replacement\s+for|drop-?in\s+replacement|preferred\s+over|"
+        r"use\s+this\s+instead\s+of|same\s+as)\b.{0,60}\b(tool|function|server)\b",
+        "shadowing_claim",
+    ),
+    (
+        r"(?i)\b(beta|temporary|migration|compatibility)\b.{0,80}"
+        r"\b(use\s+instead|supersedes|replaces)\b",
+        "shadowing_migration_claim",
+    ),
 ]
 
 SCANNED_KEYS = {
@@ -86,7 +95,7 @@ class ScanResult:
 
 
 class RegexScanner:
-    """Scans MCP tool definitions for known poison patterns."""
+    """Scans MCP tool definitions for known malicious metadata patterns."""
 
     def __init__(
         self,

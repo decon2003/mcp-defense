@@ -14,6 +14,7 @@ import logging
 from typing import Any, Awaitable, Callable, Optional
 
 from .auditor import AuditResult, LLMAuditor
+from .catalog import CatalogFinding, ToolCatalogGuard
 from .chain import ChainPolicy, ToolChainMonitor, ToolRiskProfile
 from .guard import ParameterGuard, SecurityViolation, ToolRules
 from .monitor import AlertEvent, ReasoningMonitor
@@ -36,6 +37,7 @@ class ToolPoisonDefense:
         self,
         scanner: Optional[RegexScanner] = None,
         auditor: Optional[LLMAuditor] = None,
+        catalog_guard: Optional[ToolCatalogGuard] = None,
         guard: Optional[ParameterGuard] = None,
         chain_monitor: Optional[ToolChainMonitor] = None,
         chain_policy: Optional[ChainPolicy] = None,
@@ -45,6 +47,7 @@ class ToolPoisonDefense:
     ):
         self.scanner = scanner or RegexScanner()
         self.auditor = auditor or LLMAuditor()
+        self.catalog_guard = catalog_guard or ToolCatalogGuard()
         self.guard = guard or ParameterGuard()
         self.monitor = ReasoningMonitor(alert_callback=alert_callback)
         self.chain_monitor = chain_monitor or ToolChainMonitor(policy=chain_policy)
@@ -53,12 +56,14 @@ class ToolPoisonDefense:
 
         self.last_scan_blocked: list[ScanResult] = []
         self.last_audit_blocked: list[AuditResult] = []
+        self.last_catalog_blocked: list[CatalogFinding] = []
 
     def load_tools(self, raw_tools: list[dict]) -> list[dict]:
         """
         Run load-time defenses and return only tools approved for agent context.
         """
-        after_scan, scan_blocked = self.scanner.filter(raw_tools)
+        after_catalog, catalog_blocked = self.catalog_guard.inspect(raw_tools)
+        after_scan, scan_blocked = self.scanner.filter(after_catalog)
 
         blocked_by_llm: list[AuditResult] = []
         if self._use_llm and after_scan:
@@ -68,11 +73,13 @@ class ToolPoisonDefense:
 
         self.last_scan_blocked = scan_blocked
         self.last_audit_blocked = blocked_by_llm
+        self.last_catalog_blocked = catalog_blocked
 
         logger.info(
-            "[Defense] load_tools: %d/%d passed (%d blocked by scanner, %d by auditor)",
+            "[Defense] load_tools: %d/%d passed (%d catalog, %d scanner, %d auditor)",
             len(after_audit),
             len(raw_tools),
+            len(catalog_blocked),
             len(scan_blocked),
             len(blocked_by_llm),
         )
