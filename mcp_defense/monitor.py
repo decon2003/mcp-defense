@@ -2,7 +2,7 @@
 Layer 4 - ReasoningMonitor.
 
 Runtime anomaly detection for tool calls. This layer alerts but does not block;
-blocking belongs in ParameterGuard so monitoring cannot break normal execution.
+blocking belongs in ParameterGuard and ToolChainMonitor.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +29,15 @@ DEFAULT_HIGH_RISK_TOOLS: set[str] = {
 }
 
 DEFAULT_INTENT_KEYWORDS: dict[str, list[str]] = {
-    "send_whatsapp_message": ["send", "message", "whatsapp", "text", "gửi", "nhắn"],
-    "send_email": ["send", "email", "mail", "gửi", "thư"],
-    "send_slack_message": ["send", "slack", "message", "channel", "gửi"],
-    "read_file": ["read", "file", "open", "show", "view", "đọc", "xem"],
-    "write_file": ["write", "file", "save", "create", "ghi", "lưu", "tạo"],
-    "execute_sql": ["query", "database", "db", "sql", "truy vấn"],
-    "http_request": ["fetch", "request", "api", "url", "http", "call", "gọi"],
-    "execute_code": ["run", "execute", "code", "script", "chạy"],
-    "list_repositories": ["repo", "repository", "github", "code", "dự án"],
+    "send_whatsapp_message": ["send", "message", "whatsapp", "text", "gui", "nhan"],
+    "send_email": ["send", "email", "mail", "gui", "thu"],
+    "send_slack_message": ["send", "slack", "message", "channel", "gui"],
+    "read_file": ["read", "file", "open", "show", "view", "doc", "xem"],
+    "write_file": ["write", "file", "save", "create", "ghi", "luu", "tao"],
+    "execute_sql": ["query", "database", "db", "sql", "truy van"],
+    "http_request": ["fetch", "request", "api", "url", "http", "call", "goi"],
+    "execute_code": ["run", "execute", "code", "script", "chay"],
+    "list_repositories": ["repo", "repository", "github", "code", "du an"],
     "create_pull_request": ["pr", "pull request", "merge", "push"],
 }
 
@@ -104,20 +104,30 @@ class ReasoningMonitor:
     def export_session(self, session_id: str) -> list[dict]:
         return [
             {
-                "timestamp": e.timestamp,
-                "tool": e.tool_name,
-                "params": e.params,
-                "user_request": e.user_request,
-                "flagged": e.flagged,
-                "flag_reason": e.flag_reason,
-                "flag_reasons": list(e.flag_reasons),
+                "timestamp": event.timestamp,
+                "tool": event.tool_name,
+                "params": event.params,
+                "user_request": event.user_request,
+                "flagged": event.flagged,
+                "flag_reason": event.flag_reason,
+                "flag_reasons": list(event.flag_reasons),
             }
-            for e in self._session_events.get(session_id, [])
+            for event in self._session_events.get(session_id, [])
         ]
 
     def flagged_events(self, session_id: Optional[str] = None) -> list[ToolCallEvent]:
         events = self._session_events.get(session_id, []) if session_id else self._events
-        return [e for e in events if e.flagged]
+        return [event for event in events if event.flagged]
+
+    def flag_event(
+        self,
+        event: ToolCallEvent,
+        level: str,
+        event_type: str,
+        message: str,
+    ) -> None:
+        """Public hook for other defense layers to attach alerts to a tool event."""
+        self._flag(event, level, event_type, message)
 
     def _detect_unsolicited(self, event: ToolCallEvent) -> None:
         if event.tool_name not in self.high_risk_tools:
@@ -151,8 +161,9 @@ class ReasoningMonitor:
     def _detect_burst(self, event: ToolCallEvent) -> None:
         now = event.timestamp
         window = [
-            e for e in self._session_events[event.session_id]
-            if now - e.timestamp <= self.burst_window_seconds
+            previous
+            for previous in self._session_events[event.session_id]
+            if now - previous.timestamp <= self.burst_window_seconds
         ]
         if len(window) >= self.burst_threshold:
             self._flag(

@@ -3,6 +3,7 @@ mcp-defense - Tool Poisoning defense for AI agents using MCP.
 """
 
 from .auditor import AuditResult, LLMAuditor
+from .chain import ChainPolicy, ChainViolation, ToolChainMonitor, ToolRiskProfile
 from .defense import ToolPoisonDefense
 from .guard import ParameterGuard, SecurityViolation, ToolRules
 from .monitor import AlertEvent, ReasoningMonitor, ToolCallEvent
@@ -12,6 +13,10 @@ __version__ = "1.0.0"
 
 __all__ = [
     "ToolPoisonDefense",
+    "ToolRiskProfile",
+    "ToolChainMonitor",
+    "ChainPolicy",
+    "ChainViolation",
     "RegexScanner",
     "ScanResult",
     "LLMAuditor",

