@@ -4,10 +4,6 @@
 **MCP tool-layer attacks**: Tool Poisoning, Tool Shadowing, Rug Pulls, and
 cross-tool attack chains.
 
-It is not a general-purpose LLM guardrails framework. It focuses on the tool
-layer: tool metadata, tool schemas, runtime parameters, cross-tool sequences,
-and forensic logs for agent sessions.
-
 ## Why This Exists
 
 MCP agents usually load tool descriptions and schemas into the model context.
