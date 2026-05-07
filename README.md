@@ -1,26 +1,28 @@
 # mcp-defense
 
-`mcp-defense` là thư viện Python phòng ngự **MCP tool attack chain** cho AI
-Agent.
+`mcp-defense` is a Python security layer for defending AI agents against
+**MCP tool attack chains**.
 
-Nó không cố thay thế các framework guardrails tổng quát. Repo này tập trung vào
-lớp tool: tool metadata, tool schema, tham số gọi tool, chuỗi gọi tool trong
-cùng session và log điều tra sau sự cố.
+It is not a general-purpose LLM guardrails framework. It focuses on the tool
+layer: tool metadata, tool schemas, runtime parameters, cross-tool sequences,
+and forensic logs for agent sessions.
 
-## Vấn Đề
+## Why This Exists
 
-Khi AI Agent dùng MCP, agent thường nạp toàn bộ tool description và schema vào
-context. Nếu một MCP server độc hại nhúng instruction vào mô tả tool, agent có
-thể bị dẫn vào một chuỗi tấn công:
+MCP agents usually load tool descriptions and schemas into the model context.
+If a malicious MCP server hides instructions inside that metadata, the agent
+can treat those instructions as part of the task.
+
+That can turn into a tool attack chain:
 
 ```text
-Poisoned tool description
-  -> agent chọn tool sai
-  -> agent đọc dữ liệu nhạy cảm
-  -> agent gọi tool gửi dữ liệu ra ngoài
+Poisoned tool metadata
+  -> manipulated tool selection
+  -> sensitive source tool is called
+  -> external sink tool exfiltrates data
 ```
 
-Ví dụ:
+Example poisoned tool:
 
 ```json
 {
@@ -29,72 +31,78 @@ Ví dụ:
 }
 ```
 
-`mcp-defense` đặt một lớp bảo vệ giữa agent và MCP tools.
+`mcp-defense` sits between your agent and its MCP tools so you can inspect,
+validate, alert, and optionally block these chains.
 
-## Tính Năng Chính
+## What It Protects
 
-- Chặn Tool Poisoning trong `description` và `schema`.
-- Audit semantic bằng LLM tùy chọn.
-- Validate tham số trước mỗi lần gọi tool.
-- Phát hiện chuỗi tấn công source -> external sink.
-- Cho phép cấm edge cụ thể giữa hai tool.
-- Hỗ trợ sync và async executor.
-- Có observe mode và block mode.
-- API nhỏ, dễ tích hợp vào agent hiện có.
+`mcp-defense` covers four parts of the tool layer:
 
-## Cài Đặt
+```text
+Tool discovery -> scan tool metadata and schemas
+Tool loading   -> optionally audit descriptions with an LLM
+Tool calls     -> validate parameters before execution
+Runtime chain  -> detect source-to-sink attack sequences
+```
+
+## Features
+
+- Blocks poisoned tool descriptions and schema fields before the agent sees them.
+- Validates tool parameters before execution.
+- Detects source-to-external-sink chains inside a session.
+- Lets you forbid specific tool-to-tool transitions.
+- Supports observe mode and block mode.
+- Works with synchronous and asynchronous tool executors.
+- Keeps per-session logs for debugging and incident review.
+- Has no hard dependency in the core package.
+- Provides optional LLM-based auditing for more subtle payloads.
+
+## Installation
 
 ```bash
 pip install mcp-defense
 ```
 
-Từ source:
+From source:
 
 ```bash
 pip install -e .
 ```
 
-Bật LLM audit nếu cần:
+Optional LLM audit support:
 
 ```bash
 pip install "mcp-defense[llm]"
 ```
 
+Set an Anthropic API key before enabling LLM audit:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+PowerShell:
+
 ```powershell
 $env:ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-## Tích Hợp Trong 3 Bước
+## Quickstart
 
-### 1. Tạo defense
+Wrap tool loading and tool execution.
 
 ```python
 from mcp_defense import ToolPoisonDefense
 
 defense = ToolPoisonDefense()
-```
 
-Mặc định thư viện chạy ở observe mode cho attack chain: phát hiện và log, nhưng
-không block source-to-sink chain. Muốn block:
-
-```python
-defense = ToolPoisonDefense(block_attack_chains=True)
-```
-
-### 2. Lọc tool trước khi đưa vào agent
-
-```python
+# 1. Filter tools before giving them to the agent.
 raw_tools = mcp_client.list_tools()
 safe_tools = defense.load_tools(raw_tools)
 
 agent = YourAgent(tools=safe_tools)
-```
 
-Tool có description/schema độc hại sẽ bị loại trước khi agent nhìn thấy.
-
-### 3. Wrap tool executor
-
-```python
+# 2. Route every tool call through the defense layer.
 result = defense.call_tool(
     session_id="session-1",
     tool_name=tool_name,
@@ -104,49 +112,55 @@ result = defense.call_tool(
 )
 ```
 
-`your_tool_executor` là hàm gọi tool thật của bạn:
+Your executor stays simple:
 
 ```python
 def your_tool_executor(tool_name, params):
     return mcp_client.call_tool(tool_name, params)
 ```
 
-## Async MCP Client
+## Observe Mode vs Block Mode
+
+By default, attack-chain detection runs in observe mode. It records and alerts,
+but it does not block the tool call.
 
 ```python
-async def executor(name, arguments):
-    return await session.call_tool(name, arguments)
-
-result = await defense.acall_tool(
-    session_id="session-1",
-    tool_name=name,
-    params=arguments,
-    user_request=user_request,
-    executor=executor,
-)
+defense = ToolPoisonDefense()
 ```
 
-## Phòng Ngự Tool Attack Chain
+To block dangerous chains:
 
-`mcp-defense` model tool theo risk profile:
+```python
+defense = ToolPoisonDefense(block_attack_chains=True)
+```
 
-- `source`: tool đọc dữ liệu, ví dụ `read_file`, `execute_sql`, `list_repositories`.
-- `sink`: tool gửi dữ liệu hoặc mutate hệ thống, ví dụ `send_email`, `http_request`.
-- `transform`: tool xử lý dữ liệu trung gian.
-- `neutral`: tool rủi ro thấp.
+## Defending Against Tool Attack Chains
 
-Nếu trong cùng session có chuỗi:
+The chain engine models tools by role:
+
+- `source`: reads data, such as files, database rows, message history, code.
+- `sink`: sends data or mutates an external system.
+- `transform`: processes data in between.
+- `neutral`: low-risk tools.
+
+Built-in examples:
 
 ```text
-source -> external sink
+read_file              -> source
+execute_sql            -> source
+list_repositories      -> source
+http_request           -> external sink
+send_email             -> external sink
+send_whatsapp_message  -> external sink
+create_pull_request    -> external sink
 ```
 
-thư viện sẽ ghi nhận chain. Nếu `block_attack_chains=True`, call thứ hai sẽ bị
-chặn.
-
-Ví dụ:
+If a source is followed by an external sink in the same session, `mcp-defense`
+flags the chain. In block mode, it rejects the sink call.
 
 ```python
+from mcp_defense import ToolPoisonDefense
+
 defense = ToolPoisonDefense(block_attack_chains=True)
 
 defense.call_tool(
@@ -168,15 +182,15 @@ result = defense.call_tool(
 assert "error" in result
 ```
 
-Xem timeline:
+Inspect the chain timeline:
 
 ```python
 print(defense.get_chain_log("s1"))
 ```
 
-## Custom Source/Sink Profiles
+## Custom Tool Profiles
 
-Bạn có thể đăng ký tool riêng của hệ thống:
+Register your own source and sink tools:
 
 ```python
 from mcp_defense import ToolPoisonDefense, ToolRiskProfile
@@ -204,18 +218,26 @@ defense.register_tool_profile(
 )
 ```
 
-## Cấm Edge Cụ Thể
+This detects:
 
-Nếu một cặp tool không bao giờ được đi liền nhau trong cùng session:
+```text
+read_customer_records -> post_to_webhook
+```
+
+## Forbidden Tool Edges
+
+Some tool pairs should never appear in the same session chain.
 
 ```python
 defense.forbid_tool_chain("read_file", "send_email")
 ```
 
-Khi agent gọi `read_file` rồi gọi `send_email`, chain này sẽ bị flag hoặc block
-tùy cấu hình.
+If the agent calls `read_file` and later calls `send_email` in the same
+session, that transition is flagged or blocked depending on your mode.
 
 ## Parameter Rules
+
+Use `ToolRules` to enforce parameter-level policy.
 
 ```python
 from mcp_defense.guard import ToolRules
@@ -230,7 +252,7 @@ defense.register_tool_rules(
 )
 ```
 
-Rule mặc định có sẵn cho:
+Built-in rules cover common high-risk tools:
 
 - `send_whatsapp_message`
 - `send_email`
@@ -240,16 +262,38 @@ Rule mặc định có sẵn cho:
 - `execute_sql`
 - `http_request`
 
-## LLM Audit Tùy Chọn
+These defaults are a baseline. In production, add allowlists for your own
+domains, file roots, database schemas, and internal tools.
+
+## Async Tool Executors
+
+Use `acall_tool` for async MCP clients:
+
+```python
+async def executor(name, arguments):
+    return await session.call_tool(name, arguments)
+
+result = await defense.acall_tool(
+    session_id="session-1",
+    tool_name=name,
+    params=arguments,
+    user_request=user_request,
+    executor=executor,
+)
+```
+
+## Optional LLM Audit
+
+Layer 2 can use an LLM to catch payloads that regex rules may miss.
 
 ```python
 defense = ToolPoisonDefense(use_llm_audit=True)
 ```
 
-Layer này dùng LLM để phát hiện payload tinh vi hơn regex. Vì có network call và
-chi phí API, nó bị tắt mặc định.
+This is disabled by default because it requires network access, an API key, and
+adds cost.
 
-## Ví Dụ
+## Examples
 
 ```bash
 python examples/01_minimal.py
@@ -258,26 +302,32 @@ python examples/03_claude_desktop_mcp.py
 python examples/04_tool_attack_chain.py
 ```
 
-## Test
+## Development
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-## Khi Nào Nên Dùng
+Current test coverage:
 
-Dùng `mcp-defense` nếu bạn đang xây:
+```text
+33 passed
+```
 
-- AI Agent có MCP tools.
-- Agent có tool đọc file/database/message history.
-- Agent có tool gửi email, HTTP request, Slack, WhatsApp hoặc webhook.
-- Agent cần audit trail cho tool calls.
-- Bạn muốn phòng ngự cross-tool exfiltration.
+## When To Use This
 
-Không nên coi đây là sandbox hoàn chỉnh. Trong production, vẫn cần least
-privilege, network egress control, credential readonly, approval flow cho tool
-rủi ro cao và audit log tập trung.
+Use `mcp-defense` when your agent has MCP tools that can:
+
+- read files, repositories, chat history, or databases;
+- send messages, emails, HTTP requests, or webhooks;
+- write files, create pull requests, or mutate external systems;
+- combine sensitive source tools with external sink tools.
+
+It is a defense-in-depth layer, not a sandbox. For production systems, pair it
+with least-privilege MCP servers, read-only credentials where possible, network
+egress controls, human approval for high-risk tools, and centralized audit
+logs.
 
 ## License
 
