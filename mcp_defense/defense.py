@@ -44,6 +44,7 @@ class ToolPoisonDefense:
         alert_callback: Optional[Callable[[AlertEvent], None]] = None,
         use_llm_audit: bool = False,
         block_attack_chains: bool = False,
+        auto_classify: bool = True,
     ):
         self.scanner = scanner or RegexScanner()
         self.auditor = auditor or LLMAuditor()
@@ -53,16 +54,59 @@ class ToolPoisonDefense:
         self.chain_monitor = chain_monitor or ToolChainMonitor(policy=chain_policy)
         self._use_llm = use_llm_audit
         self.block_attack_chains = block_attack_chains
+        self.auto_classify = auto_classify
 
         self.last_scan_blocked: list[ScanResult] = []
         self.last_audit_blocked: list[AuditResult] = []
         self.last_catalog_blocked: list[CatalogFinding] = []
 
+    def _auto_classify_tool(self, tool_name: str, description: str) -> None:
+        """Automatically registers a risk profile if not already present."""
+        if tool_name in self.chain_monitor.profiles:
+            return
+
+        name = tool_name.lower()
+        desc = description.lower()
+        category = "neutral"
+        external = False
+
+        # Sources (Reading data)
+        if any(w in name or w in desc for w in ["read", "get", "list", "fetch", "access", "file", "note", "contact", "db", "query"]):
+            category = "source"
+        
+        # Sinks (Sending data/Mutation)
+        if any(w in name or w in desc for w in ["send", "write", "post", "upload", "execute", "request", "notify", "call", "push"]):
+            category = "sink"
+            # External sinks
+            if any(w in name or w in desc for w in ["http", "url", "api", "external", "email", "mail", "slack", "webhook", "cloud"]):
+                external = True
+        
+        if category != "neutral":
+            self.register_tool_profile(tool_name, ToolRiskProfile(category=category, external=external))
+            logger.info("[Defense] Auto-classified tool '%s' as %s (external=%s)", tool_name, category, external)
+
     def load_tools(self, raw_tools: list[dict]) -> list[dict]:
         """
         Run load-time defenses and return only tools approved for agent context.
+        Automatically detects common formats (OpenAI, Anthropic, MCP).
         """
-        after_catalog, catalog_blocked = self.catalog_guard.inspect(raw_tools)
+        # Format detection and auto-classification
+        processed_tools = []
+        for tool in raw_tools:
+            # Handle OpenAI/Anthropic format vs raw MCP
+            tool_name = tool.get("name")
+            description = tool.get("description", "")
+            
+            if "function" in tool: # OpenAI Format
+                tool_name = tool["function"]["name"]
+                description = tool["function"].get("description", "")
+            
+            if self.auto_classify and tool_name:
+                self._auto_classify_tool(tool_name, description)
+            
+            processed_tools.append(tool)
+
+        after_catalog, catalog_blocked = self.catalog_guard.inspect(processed_tools)
         after_scan, scan_blocked = self.scanner.filter(after_catalog)
 
         blocked_by_llm: list[AuditResult] = []
