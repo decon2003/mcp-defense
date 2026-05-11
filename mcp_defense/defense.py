@@ -1,9 +1,9 @@
 """
-ToolPoisonDefense - 4-layer defense facade.
+MCPDefense - 4-layer defense facade.
 
 This is the main integration point:
 
-    defense = ToolPoisonDefense()
+    defense = MCPDefense()
     safe_tools = defense.load_tools(raw_tools)
     result = defense.call_tool(session_id, tool_name, params, user_request, executor)
 """
@@ -23,7 +23,7 @@ from .scanner import RegexScanner, ScanResult
 logger = logging.getLogger(__name__)
 
 
-class ToolPoisonDefense:
+class MCPDefense:
     """
     Orchestrates the four defense layers.
 
@@ -144,7 +144,8 @@ class ToolPoisonDefense:
             validated = self.guard.validate(tool_name, params)
         except SecurityViolation as exc:
             logger.error("[Defense] call_tool blocked: %s", exc)
-            self.monitor.record(session_id, tool_name, params, user_request)
+            event = self.monitor.record(session_id, tool_name, params, user_request)
+            self.monitor.flag_event(event, level="CRITICAL", event_type="parameter_violation", message=str(exc))
             return {"error": "Tool call was rejected for security reasons."}
 
         chain_decision = self.chain_monitor.check(session_id, tool_name, validated, user_request)
@@ -179,7 +180,8 @@ class ToolPoisonDefense:
             validated = self.guard.validate(tool_name, params)
         except SecurityViolation as exc:
             logger.error("[Defense] acall_tool blocked: %s", exc)
-            self.monitor.record(session_id, tool_name, params, user_request)
+            event = self.monitor.record(session_id, tool_name, params, user_request)
+            self.monitor.flag_event(event, level="CRITICAL", event_type="parameter_violation", message=str(exc))
             return {"error": "Tool call was rejected for security reasons."}
 
         chain_decision = self.chain_monitor.check(session_id, tool_name, validated, user_request)

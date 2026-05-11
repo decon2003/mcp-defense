@@ -36,10 +36,10 @@ Chỉ với 2 bước đơn giản để bảo vệ bất kỳ AI Agent nào:
 Sử dụng `load_tools` để chặn đứng các công cụ độc hại ngay từ khi nạp vào hệ thống.
 
 ```python
-from mcp_defense import ToolPoisonDefense
+from mcp_defense import MCPDefense
 
 # Khởi tạo với chế độ tự động phân loại
-defense = ToolPoisonDefense(block_attack_chains=True)
+defense = MCPDefense(block_attack_chains=True)
 
 # Bảo vệ danh sách công cụ (Hỗ trợ OpenAI, Anthropic, MCP)
 safe_tools = defense.load_tools(raw_tools_metadata)

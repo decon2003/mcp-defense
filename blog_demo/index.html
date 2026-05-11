@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Aria | MCP Defense</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        :root { 
+            --bg: #09090b; 
+            --panel: rgba(24, 24, 27, 0.6); 
+            --accent: #6366f1; 
+            --accent-grad: linear-gradient(135deg, #6366f1, #a855f7);
+            --danger: #ef4444; 
+            --danger-bg: rgba(239, 68, 68, 0.1);
+            --success: #10b981; 
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --border: rgba(255,255,255,0.08);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background: var(--bg); 
+            background-image: radial-gradient(circle at top right, rgba(99, 102, 241, 0.05), transparent 40%), radial-gradient(circle at bottom left, rgba(168, 85, 247, 0.05), transparent 40%);
+            color: var(--text-main); 
+            display: flex; 
+            height: 100vh; 
+            margin: 0; 
+            overflow: hidden;
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        
+        .sidebar { 
+            width: 380px; 
+            background: var(--panel); 
+            backdrop-filter: blur(20px); 
+            border-right: 1px solid var(--border); 
+            padding: 32px 24px; 
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+            font-size: 1.25rem;
+            letter-spacing: -0.02em;
+        }
+        .brand svg { width: 24px; height: 24px; color: var(--accent); }
+        .shield-icon {
+            background: var(--accent-grad);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .events-container { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 8px;}
+        .event { 
+            font-family: 'JetBrains Mono', monospace; 
+            font-size: 0.8rem; 
+            padding: 16px; 
+            border-radius: 12px; 
+            background: rgba(0,0,0,0.4); 
+            border: 1px solid var(--border);
+            line-height: 1.5;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            word-break: break-word;
+        }
+        .event::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0; width: 3px;
+        }
+        .event.blocked { border-color: rgba(239, 68, 68, 0.3); background: var(--danger-bg); }
+        .event.blocked::before { background: var(--danger); }
+        .event.allowed { border-color: rgba(16, 185, 129, 0.3); background: var(--success-bg); }
+        .event.allowed::before { background: var(--success); }
+        
+        .main { 
+            flex: 1; 
+            display: flex; 
+            flex-direction: column; 
+            position: relative;
+        }
+        .header {
+            padding: 24px 40px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+        .header h1 { margin: 0; font-size: 1.1rem; font-weight: 500; color: var(--text-muted); }
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            color: var(--success);
+            background: var(--success-bg);
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .status-badge .dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success); }
+        
+        .chat { 
+            flex: 1; 
+            overflow-y: auto; 
+            padding: 40px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 24px; 
+            scroll-behavior: smooth;
+        }
+        .msg-wrapper { display: flex; gap: 16px; max-width: 80%; }
+        .msg-wrapper.user { align-self: flex-end; flex-direction: row-reverse; }
+        .msg-wrapper.assistant { align-self: flex-start; }
+        
+        .avatar {
+            width: 36px; height: 36px;
+            border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            font-weight: 600;
+        }
+        .user .avatar { background: var(--border); color: var(--text-main); }
+        .assistant .avatar { background: var(--accent-grad); color: white; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3); }
+        
+        .msg { 
+            padding: 16px 20px; 
+            border-radius: 18px; 
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+        .user .msg { 
+            background: var(--border); 
+            border-top-right-radius: 4px;
+        }
+        .assistant .msg { 
+            background: rgba(255,255,255,0.03); 
+            border: 1px solid var(--border); 
+            border-top-left-radius: 4px;
+        }
+        
+        .input-container { 
+            padding: 24px 40px 40px; 
+            background: linear-gradient(to top, var(--bg) 50%, transparent);
+        }
+        .input-box {
+            display: flex;
+            background: rgba(24, 24, 27, 0.8);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 8px 8px 8px 24px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            transition: border-color 0.3s;
+        }
+        .input-box:focus-within { border-color: rgba(99, 102, 241, 0.5); box-shadow: 0 10px 40px rgba(99, 102, 241, 0.1); }
+        input { 
+            flex: 1; 
+            background: transparent; 
+            border: none; 
+            color: white; 
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none; 
+        }
+        input::placeholder { color: #52525b; }
+        button { 
+            background: var(--text-main); 
+            color: var(--bg);
+            border: none; 
+            width: 40px; height: 40px; 
+            border-radius: 16px; 
+            cursor: pointer; 
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        button:hover { transform: scale(1.05); background: white; }
+        button svg { width: 18px; height: 18px; }
+        
+        .empty-state {
+            margin: auto;
+            text-align: center;
+            color: var(--text-muted);
+            max-width: 400px;
+        }
+        .empty-state h2 { color: var(--text-main); margin-bottom: 8px; font-weight: 500;}
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="brand">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <span>MCP <span class="shield-icon">Defense</span></span>
+        </div>
+        <div style="font-size:0.85rem; color:var(--text-muted); padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+            Real-time security logs for Tool calls.
+        </div>
+        <div class="events-container" id="events"></div>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>Aria <span style="opacity:0.5">/ OpenAI Agent</span></h1>
+            <div class="status-badge">
+                <div class="dot"></div> Protected
+            </div>
+        </div>
+        <div class="chat" id="chat">
+            <div class="empty-state" id="empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:48px;height:48px;margin-bottom:16px;opacity:0.5;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <h2>Hi, I'm Aria</h2>
+                <p>An AI assistant equipped with file reading and network tools, protected by MCP Defense.</p>
+            </div>
+        </div>
+        <div class="input-container">
+            <div class="input-box">
+                <input type="text" id="input" placeholder="Message Aria..." autocomplete="off" onkeypress="if(event.key === 'Enter') send()">
+                <button onclick="send()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script>
+        const chat = document.getElementById('chat');
+        const events = document.getElementById('events');
+        const empty = document.getElementById('empty');
+        
+        async function send() {
+            const msg = document.getElementById('input').value;
+            if(!msg) return;
+            if(empty) empty.style.display = 'none';
+            
+            append('user', msg);
+            document.getElementById('input').value = '';
+            
+            const thinkingId = 'thinking-' + Date.now();
+            append('assistant', '<span style="opacity:0.5; animation: pulse 1.5s infinite;">Thinking...</span>', thinkingId);
+            
+            try {
+                const res = await fetch('/api/chat', { method:'POST', body:JSON.stringify({message:msg}) });
+                const data = await res.json();
+                
+                const tNode = document.getElementById(thinkingId);
+                if(tNode) tNode.remove();
+                
+                append('assistant', data.response);
+                updateEvents(data.defense_log);
+            } catch (e) {
+                const tNode = document.getElementById(thinkingId);
+                if(tNode) tNode.remove();
+                append('assistant', '<span style="color:#ef4444">Connection error.</span>');
+            }
+        }
+        
+        function append(role, text, id=null) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `msg-wrapper ${role}`;
+            if(id) wrapper.id = id;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.innerHTML = role === 'user' ? 'U' : '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-1v2h2v-2h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2v2h2v-2H10a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h2z"></path></svg>';
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'msg';
+            msgDiv.innerHTML = text.replace(/\\n/g, '<br>');
+            
+            wrapper.appendChild(avatar);
+            wrapper.appendChild(msgDiv);
+            chat.appendChild(wrapper);
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        function updateEvents(log) {
+            events.innerHTML = '';
+            
+            if(log.catalog_blocked) log.catalog_blocked.forEach(msg => {
+                const d = document.createElement('div');
+                d.className = 'event blocked';
+                d.innerHTML = '<strong style="color:var(--danger)">CATALOG GUARD</strong><br>' + msg;
+                events.appendChild(d);
+            });
+
+            if(log.session_log) log.session_log.forEach(s => {
+                if(s.flagged) {
+                    const d = document.createElement('div');
+                    d.className = 'event blocked';
+                    d.innerHTML = '<strong style="color:var(--danger)">PARAMETER GUARD</strong><br>Tool: ' + s.tool + '<br>' + s.flag_reason;
+                    events.appendChild(d);
+                }
+            });
+
+            if(log.chain_log) log.chain_log.forEach(c => {
+                const d = document.createElement('div');
+                d.className = 'event ' + (c.allowed ? 'allowed' : 'blocked');
+                const titleColor = c.allowed ? 'var(--success)' : 'var(--danger)';
+                const title = c.allowed ? 'CHAIN ALLOWED' : 'CHAIN BLOCKED';
+                d.innerHTML = `<strong style="color:${titleColor}">${title}</strong><br>Tool: ${c.tool}<br>${c.message}`;
+                events.appendChild(d);
+            });
+        }
+
+        fetch('/api/status').then(r => r.json()).then(data => {
+            if(data.history && data.history.length > 1) {
+                if(empty) empty.style.display = 'none';
+            }
+            updateEvents(data.defense);
+        });
+    </script>
+</body>
+</html>

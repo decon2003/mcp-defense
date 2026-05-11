@@ -1,6 +1,6 @@
 import pytest
 
-from mcp_defense import ToolPoisonDefense
+from mcp_defense import MCPDefense
 from mcp_defense.auditor import _parse_audit_response
 from mcp_defense.catalog import ToolCatalogGuard
 from mcp_defense.chain import ChainPolicy, ToolChainMonitor, ToolRiskProfile
@@ -266,10 +266,10 @@ class TestAuditor:
         assert "invalid" in reason
 
 
-class TestToolPoisonDefenseIntegration:
+class TestMCPDefenseIntegration:
     def setup_method(self):
         self.alerts = []
-        self.defense = ToolPoisonDefense(alert_callback=self.alerts.append)
+        self.defense = MCPDefense(alert_callback=self.alerts.append)
 
     def executor(self, tool_name, params):
         return {"result": f"executed {tool_name}", "params": params}
@@ -350,7 +350,7 @@ class TestToolPoisonDefenseIntegration:
         assert "source-to-external-sink" in session_log[-1]["flag_reason"]
 
     def test_attack_chain_can_block(self):
-        defense = ToolPoisonDefense(block_attack_chains=True)
+        defense = MCPDefense(block_attack_chains=True)
         defense.call_tool(
             "sess-block",
             "read_file",
@@ -370,7 +370,7 @@ class TestToolPoisonDefenseIntegration:
         assert "attack chain" in result["error"]
 
     def test_register_tool_profile_and_forbidden_chain(self):
-        defense = ToolPoisonDefense(block_attack_chains=True)
+        defense = MCPDefense(block_attack_chains=True)
         defense.register_tool_profile(
             "read_messages",
             ToolRiskProfile("source", ("messages",), False, ("read", "messages")),
@@ -401,7 +401,7 @@ class TestToolPoisonDefenseIntegration:
 
     @pytest.mark.asyncio
     async def test_async_attack_chain_can_block(self):
-        defense = ToolPoisonDefense(block_attack_chains=True)
+        defense = MCPDefense(block_attack_chains=True)
 
         async def executor(tool_name, params):
             return {"result": tool_name, "params": params}

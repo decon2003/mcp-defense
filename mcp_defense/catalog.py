@@ -102,6 +102,8 @@ class ToolCatalogGuard:
 
 def _tool_get(tool: Any, key: str, default: Any = None) -> Any:
     if isinstance(tool, dict):
+        if key == "name" and "function" in tool and "name" in tool["function"]:
+            return tool["function"]["name"]
         return tool.get(key, default)
     if hasattr(tool, "model_dump"):
         return tool.model_dump().get(key, default)
